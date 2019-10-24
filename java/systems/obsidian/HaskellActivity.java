@@ -1,19 +1,25 @@
 package systems.obsidian;
 
 import android.app.Activity;
+import android.content.Context;
 import android.content.Intent;
 import android.app.PendingIntent;
 import android.app.Notification;
 import android.os.Bundle;
 import android.util.Log;
 import java.util.concurrent.SynchronousQueue;
+import android.content.BroadcastReceiver;
+import android.content.IntentFilter;
 import android.content.pm.PackageManager;
+import android.os.BatteryManager;
 import android.Manifest;
 import android.webkit.PermissionRequest;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Arrays;
 import java.util.HashSet;
+import android.view.WindowManager;
+import android.view.View;
 import android.annotation.TargetApi;
 import android.os.Build;
 
@@ -83,6 +89,7 @@ public class HaskellActivity extends Activity {
     } else {
       haskellOnCreate(callbacks); //TODO: Pass savedInstanceState as well
     }
+    getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
   }
 
   @Override
@@ -148,6 +155,64 @@ public class HaskellActivity extends Activity {
     if(callbacks != 0 && intent != null && intent.getData() != null && intent.getAction() != null) {
       haskellOnNewIntent(callbacks, intent.getAction(), intent.getDataString()); //TODO: Use a more canonical way of passing this data - i.e. pass the Intent and let the Haskell side get the data out with JNI
     }
+  }
+
+  @Override
+  public void onWindowFocusChanged(boolean hasFocus) {
+    super.onWindowFocusChanged(hasFocus);
+    View v = getCurrentFocus();
+    if(v != null) {
+        v.setSystemUiVisibility(
+              View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                      | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                      | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                      | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                      | View.SYSTEM_UI_FLAG_FULLSCREEN
+                      | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);
+    }
+  }
+
+  public interface BatteryStatusCallback {
+      public void batteryStatusChanged(boolean charging, int percent);
+  }
+
+  private class PowerReceiver extends BroadcastReceiver {
+      @Override
+      public void onReceive(Context context, Intent intent) {
+          int status = intent.getIntExtra(BatteryManager.EXTRA_STATUS, -1);
+          boolean charging = status == BatteryManager.BATTERY_STATUS_CHARGING ||
+              status == BatteryManager.BATTERY_STATUS_FULL;
+
+          int level = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, -1);
+          int scale = intent.getIntExtra(BatteryManager.EXTRA_SCALE, -1);
+
+          int pct = (100 * level) / scale;
+
+          if(bsCallback != null) {
+              bsCallback.batteryStatusChanged(charging, pct);
+          }
+      }
+  }
+
+  private BatteryStatusCallback bsCallback;
+  private final PowerReceiver powerReceiver = new PowerReceiver();
+
+  public String setBatteryStatusCallback(BatteryStatusCallback cb) {
+      bsCallback = cb;
+
+      IntentFilter filter = new IntentFilter(Intent.ACTION_BATTERY_CHANGED);
+      Intent intent = registerReceiver(powerReceiver, filter);
+
+      int status = intent.getIntExtra(BatteryManager.EXTRA_STATUS, -1);
+      boolean charging = status == BatteryManager.BATTERY_STATUS_CHARGING ||
+          status == BatteryManager.BATTERY_STATUS_FULL;
+
+      int level = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, -1);
+      int scale = intent.getIntExtra(BatteryManager.EXTRA_SCALE, -1);
+
+      int pct = (100 * level) / scale;
+
+      return "{\"charging\": " + charging + ", \"percent\": " + pct + "}";
   }
 
   // Proper separation of concerns is really a whole lot of work in Java, so
